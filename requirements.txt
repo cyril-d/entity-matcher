@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+colbert
+torch
+transformers
+openai
+pytest
+flask
+flask_sqlalchemy
+flask-cors
+sentence-transformers
