@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from app.match import match_fields
-from app.database import db, Schema, Entity, Field
+from app.database import db, Schema, Entity, Field, get_matching_data_from_db, store_matching_data_in_db
 
 app = Flask(__name__)
 CORS(app)  # Allow CORS for all routes
@@ -154,10 +154,19 @@ def match_entities():
     target_schema_id = data.get("target_schema_id")
     source_entity_name = data.get("source_entity_name")
     target_entity_name = data.get("target_entity_name")
+    ignore_db = data.get("ignore_db", False)  # Default to False
 
     # Validate inputs
     if not all([source_schema_id, target_schema_id, source_entity_name, target_entity_name]):
         return jsonify({"error": "All fields are required."}), 400
+
+    # Check the database first (mock function `get_matching_data_from_db`)
+    if not ignore_db:
+        db_data = get_matching_data_from_db(
+            source_schema_id, target_schema_id, source_entity_name, target_entity_name
+        )
+        if db_data:
+            return jsonify({"field_mappings": db_data}), 200
 
     # Retrieve entities
     source_entities = get_schema_entities(source_schema_id)
@@ -172,7 +181,12 @@ def match_entities():
     # Perform field matching using external match function
     field_mappings = match_fields(source_fields, target_fields)
 
-    return generateResponse({"field_mappings": field_mappings}, 200)
+    # Store the result in the database for future queries (mock function `store_matching_data_in_db`)
+    store_matching_data_in_db(
+        source_schema_id, target_schema_id, source_entity_name, target_entity_name, field_mappings
+    )
+
+    return jsonify({"field_mappings": field_mappings}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True)
