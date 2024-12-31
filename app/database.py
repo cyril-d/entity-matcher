@@ -42,6 +42,19 @@ class FieldMatch(db.Model):
         ),
     )
 
+def get_schema_entities(schema_id):
+    """Helper to get all entities of a specific schema."""
+    schema = Schema.query.get(schema_id)
+    if not schema:
+        return {}
+    
+    entities = {}
+    for entity in schema.entities:
+        fields = [{"id": field.id, "name": field.name, "description": field.description} for field in entity.fields]
+        entities[entity.name] = {"description": entity.description, "fields": fields}
+    
+    return entities
+
 def store_matching_data_in_db(source_schema_id, target_schema_id, source_entity_name, target_entity_name, field_mappings):
     """
     Stores matching data into the database.

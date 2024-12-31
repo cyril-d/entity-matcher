@@ -1,10 +1,10 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from app.match import match_fields
-from app.database import db, Schema, Entity, Field, get_matching_data_from_db, store_matching_data_in_db
+from app.database import db, Schema, Entity, Field, get_matching_data_from_db, get_schema_entities, store_matching_data_in_db
 
 app = Flask(__name__)
-CORS(app)  # Allow CORS for all routes
+CORS(app)  # Not working.
 # CORS(app, resources={r"/schemas/*": {"origins": "http://localhost:3000"}})
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///schemas.db'
@@ -15,28 +15,115 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
 
-@app.after_request
-def add_security_headers(resp):
-    resp.headers['Access-Control-Allow-Origin']='http://localhost:3000'
-    resp.headers['Access-Control-Allow-Methods']='GET, POST, PUT, OPTIONS'
-    resp.headers["Access-Control-Allow-Headers"]="Access-Control-Request-Headers,Access-Control-Allow-Methods,Access-Control-Allow-Headers,Access-Control-Allow-Origin, Origin, X-Requested-With, Content-Type, Accept"
-    return resp
-
-@app.before_request
-def before_request():
-    if request.method == 'OPTIONS':
-        response = app.make_response('')
-        response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        return response
-
 def generateResponse(json, statusCode):
     response = jsonify(json)
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.status_code = statusCode
     print(response)
     return response;
+
+@app.route('/api/schema', methods=['POST'])
+def api_insert_or_update_schema():
+    """API to insert or update a schema."""
+    data = request.get_json()
+
+    schema_name = data.get('schema_name')
+    schema_description = data.get('schema_description')
+
+    if not schema_name:
+        return jsonify({"error": "Schema name is required."}), 400
+
+    try:
+        schema = insert_or_update_schema(
+            schema_name=schema_name,
+            schema_description=schema_description
+        )
+        return generateResponse({
+            "message": "Schema inserted/updated successfully.",
+            "schema": {
+                "id": schema.id,
+                "name": schema.name,
+                "description": schema.description
+            }
+        }, 201)
+
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {e}"}), 500
+
+@app.route('/api/entity', methods=['POST'])
+def api_insert_or_update_entity():
+    """API to insert or update an entity and its fields."""
+    data = request.get_json()
+
+    schema_id = data.get('schema_id')
+    entity_name = data.get('entity_name')
+    entity_description = data.get('entity_description')
+    fields_data = data.get('fields')
+
+    if not schema_id or not entity_name or not fields_data:
+        return jsonify({"error": "Schema ID, entity name, and fields are required."}), 400
+
+    try:
+        entity = insert_or_update_entity(
+            schema_id=schema_id,
+            entity_name=entity_name,
+            entity_description=entity_description,
+            fields_data=fields_data
+        )
+        return generateResponse({
+            "message": "Entity inserted/updated successfully.",
+            "entity": {
+                "id": entity.id,
+                "name": entity.name,
+                "description": entity.description,
+                "fields": [
+                    {
+                        "name": field.name,
+                        "description": field.description
+                    } for field in entity.fields
+                ]
+            }
+        }, 201)
+
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {e}"}), 500
+
+@app.route('/api/entity/<int:entity_id>', methods=['DELETE'])
+def api_delete_entity(entity_id):
+    """API to delete an entity and its associated fields."""
+    try:
+        # Call the delete_entity function
+        deleted = delete_entity(entity_id)
+
+        if not deleted:
+            return jsonify({"error": "Entity not found."}), 404
+
+        return generateResponse({"message": "Entity deleted successfully."}, 200)
+
+    except Exception as e:
+        return generateResponse({"error": f"An error occurred: {e}"}, 500)
+
+def delete_entity(entity_id):
+    """
+    Deletes an entity and its associated fields from the database.
+
+    Args:
+        entity_id (int): The ID of the entity to delete.
+
+    Returns:
+        bool: True if the entity was successfully deleted, False otherwise.
+    """
+
+    # Find the entity by ID
+    entity = Entity.query.get(entity_id)
+    if not entity:
+        return False
+
+    # Delete the entity and its associated fields
+    db.session.delete(entity)
+    db.session.commit()
+
+    return True
 
 @app.route('/upload-schema', methods=['POST'])
 def upload_schema():
@@ -90,10 +177,11 @@ def get_all_schemas():
         entities = []
         for entity in schema.entities:
             fields = [
-                {"name": field.name, "description": field.description} 
+                {"id": field.id, "name": field.name, "description": field.description} 
                 for field in entity.fields
             ]
             entities.append({
+                "id": entity.id,
                 "name": entity.name,
                 "description": entity.description,
                 "fields": fields
@@ -108,24 +196,10 @@ def get_all_schemas():
 
     return generateResponse(result, 200)
 
-def get_schema_entities(schema_id):
-    """Helper to get all entities of a specific schema."""
-    schema = Schema.query.get(schema_id)
-    if not schema:
-        return {}
-    
-    entities = {}
-    for entity in schema.entities:
-        fields = [{"name": field.name, "description": field.description} for field in entity.fields]
-        entities[entity.name] = {"description": entity.description, "fields": fields}
-    
-    return entities
-
 @app.route('/entities/<int:schema_id>/', methods=['GET'])
 def list_entities(schema_id):
     """API to retrieve all entities in a specified schema."""
     try:
-        # Use the get_schema_entities function
         entities = get_schema_entities(schema_id)
 
         if not entities:
@@ -145,6 +219,80 @@ def list_entities(schema_id):
     except Exception as e:
         return generateResponse({"error": f"An error occurred: {str(e)}"}, 500)
 
+def insert_or_update_schema(schema_name, schema_description=None):
+    """
+    Inserts a new schema or updates an existing schema.
+
+    Args:
+        schema_name (str): The name of the schema.
+        schema_description (str): Optional description of the schema.
+
+    Returns:
+        Schema: The inserted or updated schema object.
+    """
+    # Check if schema exists
+    schema = Schema.query.filter_by(name=schema_name).first()
+
+    if schema:
+        # Update schema description if necessary
+        schema.description = schema_description
+    else:
+        # Create a new schema
+        schema = Schema(name=schema_name, description=schema_description)
+        db.session.add(schema)
+
+    # Commit the transaction
+    db.session.commit()
+    return schema
+
+
+def insert_or_update_entity(schema_id, entity_name, entity_description=None, fields_data=None):
+    """
+    Inserts a new entity or updates an existing entity and its fields.
+
+    Args:
+        schema_id (int): The ID of the schema the entity belongs to.
+        entity_name (str): The name of the entity.
+        entity_description (str): Optional description of the entity.
+        fields_data (list): A list of field dictionaries with 'name' and 'description'.
+
+    Returns:
+        Entity: The inserted or updated entity object.
+    """
+    if not schema_id:
+        raise ValueError("Schema ID is required to associate an entity.")
+
+    # Check if entity exists
+    entity = Entity.query.filter_by(name=entity_name, schema_id=schema_id).first()
+
+    if entity:
+        # Update entity description
+        entity.description = entity_description
+
+        # Delete all existing fields for the entity
+        Field.query.filter_by(entity_id=entity.id).delete()
+    else:
+        # Create a new entity
+        entity = Entity(name=entity_name, description=entity_description, schema_id=schema_id)
+        db.session.add(entity)
+        db.session.commit()  # Commit to get the entity ID
+
+    # Add new fields
+    if fields_data:
+        for field_data in fields_data:
+            field_name = field_data.get('name')
+            field_description = field_data.get('description')
+
+            if not field_name:
+                continue
+
+            # Create field entry
+            field = Field(name=field_name, description=field_description, entity_id=entity.id)
+            db.session.add(field)
+
+    # Commit the transaction
+    db.session.commit()
+    return entity
 
 @app.route('/match-entities/', methods=['POST'])
 def match_entities():
@@ -186,7 +334,7 @@ def match_entities():
         source_schema_id, target_schema_id, source_entity_name, target_entity_name, field_mappings
     )
 
-    return jsonify({"field_mappings": field_mappings}), 200
+    return generateResponse({"field_mappings": field_mappings}, 200)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True)
