@@ -1,14 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import numpy as np
-import torch
-from app.colbert_handler import embed_text
-from app.utils import generate_embeddings, rank_candidates, rank_candidates_pytorch
-from app.llm_handler import query_llm
-import sqlite3
-from flask_sqlalchemy import SQLAlchemy
+from app.match import match_fields
 from app.database import db, Schema, Entity, Field
-import json
 
 app = Flask(__name__)
 CORS(app)  # Allow CORS for all routes
@@ -16,6 +9,7 @@ CORS(app)  # Allow CORS for all routes
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///schemas.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
 db.init_app(app)
 
 with app.app_context():
@@ -175,70 +169,10 @@ def match_entities():
     source_fields = source_entities[source_entity_name]["fields"]
     target_fields = target_entities[target_entity_name]["fields"]
 
-    # Generate text descriptions
-    # source_fields_text = [f"{field}" for field in source_fields]
-    # target_fields_text = [f"{field}" for field in target_fields]
-    source_fields_text = [f"{field['name']}: {field['description']}" for field in source_fields]
-    target_fields_text = [f"{field['name']}: {field['description']}" for field in target_fields]
+    # Perform field matching using external match function
+    field_mappings = match_fields(source_fields, target_fields)
 
-    # Rank entity-level similarity
-    ranked_by_model = rank_candidates(" ".join(source_fields_text), target_fields_text)
-    # ranked_by_llm = query_llm(" ".join(source_fields_text), target_fields_text)
-    # combined_results = sorted(ranked_by_model + ranked_by_llm, key=lambda x: x[1], reverse=True)
-    combined_results = sorted(ranked_by_model, key=lambda x: x[1], reverse=True)
-    # Compute field-to-field mappings
-    field_mappings = []
-    for source_field in source_fields:
-        # Embed both the name and description for the source field
-        source_embedding = embed_text_with_context(source_field['name'], source_field['description'])
-        
-        # Generate embeddings for the target fields (name + description)
-        target_embeddings = [
-            embed_text_with_context(target_field['name'], target_field['description']) 
-            for target_field in target_fields
-        ]
-        # source_embedding = generate_embeddings(source_field.replace("_", " "))
-        # target_embeddings = [generate_embeddings(target_field.replace("_", " ")) for target_field in target_fields]
-
-        # Compute similarity for each field
-        field_similarities = rank_candidates_pytorch(source_embedding, torch.stack(target_embeddings))
-        for target_index, score in field_similarities:
-            field_mappings.append({
-                "source_field": source_field,
-                "target_field": target_fields[target_index],
-                "score": float(score)
-            })
-    # Convert all numerical values to native Python types (int, float)
-    def convert_to_native(obj):
-        if isinstance(obj, np.int64):
-            return int(obj)
-        elif isinstance(obj, np.float64):
-            return float(obj)
-        elif isinstance(obj, list):
-            return [convert_to_native(item) for item in obj]
-        elif isinstance(obj, dict):
-            return {key: convert_to_native(value) for key, value in obj.items()}
-        return obj
-    
-    print(combined_results)
-    # Convert results to ensure compatibility with JSON serialization
-    combined_results = [(
-        convert_to_native(result[0]),  # index remains the same
-        convert_to_native(result[1])  # Convert the score
-    ) for result in combined_results]
-
-    field_mappings = [convert_to_native(mapping) for mapping in field_mappings]
-
-    return generateResponse({
-        "entity_similarity": [
-            {"index": result[0], "score": float(result[1])} for result in combined_results
-        ],
-        "field_mappings": field_mappings
-    }, 200)
-
-def embed_text_with_context(field_name, description):
-    context = f"Field: {field_name.replace("_", " ")}. Description: {description}"
-    return generate_embeddings(context)
+    return generateResponse({"field_mappings": field_mappings}, 200)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True)
