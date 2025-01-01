@@ -26,16 +26,38 @@ def download_spec_from_url(url):
         return None
 
 
+def resolve_reference(ref, spec):
+    """
+    Resolves a $ref to its corresponding definition in the OpenAPI/Swagger spec.
+
+    Args:
+        ref (str): The $ref string (e.g., "#/definitions/Position").
+        spec (dict): The OpenAPI/Swagger spec.
+
+    Returns:
+        dict: The resolved definition, or None if not found.
+    """
+    if ref.startswith("#/"):
+        path = ref.lstrip("#/").split("/")
+        resolved = spec
+        for key in path:
+            resolved = resolved.get(key)
+            if resolved is None:
+                return None
+        return resolved
+    return None
+
 def extract_entities_from_spec(spec):
     """
-    Extracts entities from OpenAPI or Swagger specifications.
-    Entities are objects that have at least one primitive or enum property (leaf node).
-    
+    Extract entities from OpenAPI/Swagger specifications.
+
+    Entities are objects with leaf properties (primitives) and/or references to other objects.
+
     Args:
-        spec (dict): Parsed OpenAPI or Swagger specification.
-    
+        spec (dict): The OpenAPI/Swagger spec.
+
     Returns:
-        list: A list of dictionaries containing entity names and their fields.
+        list: A list of extracted entities, each represented as a dictionary.
     """
     entities = []
 
@@ -45,43 +67,42 @@ def extract_entities_from_spec(spec):
         schemas = spec.get("definitions", {})
 
     for schema_name, schema in schemas.items():
-        # Ensure this schema is an object with properties
         schema_type = schema.get("type")
         properties = schema.get("properties", {})
+
+        # Ensure this schema is an object with properties
         if schema_type != "object" or not properties:
             continue
 
-        # Collect fields (leaf properties) and determine if it has primitives
         fields = []
         has_primitive = False
+
         for prop_name, prop_info in properties.items():
             prop_type = prop_info.get("type")
-
-            # Check if the property is a reference to another object
-            if prop_type == "object" and "$ref" in prop_info:
-                continue  # Skip, as it's a reference
-
-            if prop_type == "array" and "items" in prop_info and "$ref" in prop_info["items"]:
-                continue  # Skip, as it's an array of references
-
-            # If it's a primitive or enum, add it to fields
-            if prop_type in ["string", "number", "boolean", "integer"]:
+            if "$ref" in prop_info:
+                # Resolve the reference and check if it's a primitive
+                ref_definition = resolve_reference(prop_info["$ref"], spec)
+                if ref_definition:
+                    ref_type = ref_definition.get("type")
+                    if ref_type in ["string", "number", "boolean", "integer"]:
+                        has_primitive = True
+                        fields.append({
+                            "name": prop_name,
+                            "description": ref_definition.get("description", ""),
+                            "type": ref_type,
+                            "enum": ref_definition.get("enum")
+                        })
+            elif prop_type in ["string", "number", "boolean", "integer"] or "enum" in prop_info:
+                # Directly defined primitive or enum
                 has_primitive = True
                 fields.append({
                     "name": prop_name,
                     "description": prop_info.get("description", ""),
-                    "type": prop_type,
-                })
-            elif "enum" in prop_info:
-                has_primitive = True
-                fields.append({
-                    "name": prop_name,
-                    "description": prop_info.get("description", ""),
-                    "type": "enum",
-                    "enum": prop_info["enum"]
+                    "type": prop_type or "enum",
+                    "enum": prop_info.get("enum")
                 })
 
-        # If it has at least one primitive property, treat it as an entity
+        # If it has at least one primitive, treat it as an entity
         if has_primitive:
             entities.append({
                 "name": schema_name,
@@ -176,7 +197,7 @@ if __name__ == "__main__":
     schema_description = sys.argv[3]
 
     # Initialize Flask app context for database operations
-    from app import app  # Import the Flask app
+    from main import app  # Import the Flask app
 
     with app.app_context():
         process_sources(input_file, schema_name, schema_description)
