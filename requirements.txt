@@ -9,3 +9,5 @@ flask
 flask_sqlalchemy
 flask-cors
 sentence-transformers
+pyyaml
+requests

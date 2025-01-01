@@ -1,0 +1,12 @@
+# This file contains a mix of file paths and URLs to OpenAPI/Swagger specs.
+
+# Local file paths
+# openapi1.yaml
+# swagger2.json
+
+# Remote URLs
+# https://example.com/openapi.yaml
+# https://api.example.com/swagger.json
+
+# Ignore the following commented-out lines
+# https://example.com/invalid-spec.yaml
