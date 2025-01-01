@@ -28,34 +28,68 @@ def download_spec_from_url(url):
 
 def extract_entities_from_spec(spec):
     """
-    Extracts entities from an OpenAPI or Swagger specification.
-
+    Extracts entities from OpenAPI or Swagger specifications.
+    Entities are objects that have at least one primitive or enum property (leaf node).
+    
     Args:
-        spec (dict): The parsed OpenAPI or Swagger specification.
-
+        spec (dict): Parsed OpenAPI or Swagger specification.
+    
     Returns:
-        list: A list of entity dictionaries with 'name' and 'description'.
+        list: A list of dictionaries containing entity names and their fields.
     """
     entities = []
-    try:
-        components = spec.get('components', {}).get('schemas', {})
-        for entity_name, entity_details in components.items():
-            description = entity_details.get('description', 'No description provided.')
-            entities.append({"name": entity_name, "description": description})
-    except Exception:
-        pass  # Continue if OpenAPI-style entities are not found
 
-    # If OpenAPI-style components are not found, try Swagger-style definitions
-    try:
-        definitions = spec.get('definitions', {})
-        for entity_name, entity_details in definitions.items():
-            description = entity_details.get('description', 'No description provided.')
-            entities.append({"name": entity_name, "description": description})
-    except Exception:
-        pass
+    # Locate schemas or definitions (depending on OpenAPI/Swagger version)
+    schemas = spec.get("components", {}).get("schemas", {})
+    if not schemas:
+        schemas = spec.get("definitions", {})
+
+    for schema_name, schema in schemas.items():
+        # Ensure this schema is an object with properties
+        schema_type = schema.get("type")
+        properties = schema.get("properties", {})
+        if schema_type != "object" or not properties:
+            continue
+
+        # Collect fields (leaf properties) and determine if it has primitives
+        fields = []
+        has_primitive = False
+        for prop_name, prop_info in properties.items():
+            prop_type = prop_info.get("type")
+
+            # Check if the property is a reference to another object
+            if prop_type == "object" and "$ref" in prop_info:
+                continue  # Skip, as it's a reference
+
+            if prop_type == "array" and "items" in prop_info and "$ref" in prop_info["items"]:
+                continue  # Skip, as it's an array of references
+
+            # If it's a primitive or enum, add it to fields
+            if prop_type in ["string", "number", "boolean", "integer"]:
+                has_primitive = True
+                fields.append({
+                    "name": prop_name,
+                    "description": prop_info.get("description", ""),
+                    "type": prop_type,
+                })
+            elif "enum" in prop_info:
+                has_primitive = True
+                fields.append({
+                    "name": prop_name,
+                    "description": prop_info.get("description", ""),
+                    "type": "enum",
+                    "enum": prop_info["enum"]
+                })
+
+        # If it has at least one primitive property, treat it as an entity
+        if has_primitive:
+            entities.append({
+                "name": schema_name,
+                "description": schema.get("description", ""),
+                "fields": fields
+            })
 
     return entities
-
 
 def process_sources(input_file, schema_name, schema_description):
     """
