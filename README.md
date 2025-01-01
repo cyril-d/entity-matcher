@@ -22,4 +22,73 @@ This tool provides schema matching capabilities using ColBERTv2 for semantic sim
    python -c "from app.database import initialize_db; initialize_db()"
    python main.py
    
-Run tests optionally: pytest tests - doesnt work yet
+## Tests
+
+pytest tests - doesnt work yet
+
+## API Usage
+
+1. Upsert Schema:
+
+curl --request POST \
+  --url http://127.0.0.1:8000/api/schema \
+  --header 'Content-Type: application/json'
+  --data '{
+  "schema_name": "CustomerSchemaD",
+  "schema_description": "Customer related data"
+}
+'
+
+2. Upsert Entity:
+
+curl --request POST \
+  --url http://127.0.0.1:8000/api/entity \
+  --header 'Content-Type: application/json'
+  --data '{
+  "schema_id": 4,
+  "entity_name": "Customer",
+	"entity_description": "Details about the customer",
+	"fields": [
+		{"name": "customername", "description": "The full name of the customer"},
+		{"name": "email", "description": "The email address of the customer"},
+		{"name": "phone", "description": "The phone number of the customer"}
+	]
+}
+'
+
+3. Get Schema by id:
+
+curl --request GET \
+  --url http://127.0.0.1:8000/api/schema/4 \
+  --header 'Content-Type: application/json'
+
+4. List entities in a schema:
+
+curl --request GET \
+  --url http://127.0.0.1:8000/api/entities/4/ \
+  --header 'Content-Type: application/json'
+
+5. Get Entity by id:
+
+curl --request GET \
+  --url http://127.0.0.1:8000/api/entity/7 \
+  --header 'Content-Type: application/json'
+
+6. List Schemas:
+
+curl --request GET \
+  --url http://127.0.0.1:8000/api/schemas/ \
+  --header 'Content-Type: application/json' 
+
+7. Match Entities:
+
+curl --request POST \
+  --url http://127.0.0.1:8000/api/match-entities/ \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "source_schema_id": 1,
+    "target_schema_id": 2,
+    "source_entity_name": "Customer",
+	  "target_entity_name": "Customer"
+}
+'
