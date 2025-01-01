@@ -1,7 +1,7 @@
 # Schema Mapper Tool
 
 ## Overview
-This tool provides schema matching capabilities using ColBERTv2 for semantic similarity and LLM-based ranking. It includes APIs for schema management, matching, and ranking.
+This tool provides schema matching capabilities using ColBERTv2 and other models for semantic similarity and LLM-based ranking. It includes APIs for schema management, matching, and ranking.
 
 ## Features
 - Upload schemas with entities and fields
