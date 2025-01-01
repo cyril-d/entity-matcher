@@ -42,16 +42,104 @@ class FieldMatch(db.Model):
         ),
     )
 
+def insert_or_update_schema(schema_name, schema_description=None):
+    schema = Schema.query.filter_by(name=schema_name).first()
+
+    if schema:
+        schema.description = schema_description
+    else:
+        schema = Schema(name=schema_name, description=schema_description)
+        db.session.add(schema)
+
+    db.session.commit()
+    return schema
+
+def insert_or_update_entity(schema_id, entity_name, entity_description=None, fields_data=None):
+    entity = Entity.query.filter_by(name=entity_name, schema_id=schema_id).first()
+
+    if entity:
+        entity.description = entity_description
+        Field.query.filter_by(entity_id=entity.id).delete()
+    else:
+        entity = Entity(name=entity_name, description=entity_description, schema_id=schema_id)
+        db.session.add(entity)
+        db.session.commit()
+
+    if fields_data:
+        for field_data in fields_data:
+            field = Field(
+                name=field_data.get('name'),
+                description=field_data.get('description'),
+                entity_id=entity.id
+            )
+            db.session.add(field)
+
+    db.session.commit()
+    return entity
+
+
+def delete_entity(entity_id):
+    entity = Entity.query.get(entity_id)
+    if not entity:
+        return False
+
+    db.session.delete(entity)
+    db.session.commit()
+    return True
+
+def get_all_schemas():
+    schemas = Schema.query.all()
+    result = []
+    for schema in schemas:
+        entities = []
+        for entity in schema.entities:
+            fields = [{"id": field.id, "name": field.name, "description": field.description} for field in entity.fields]
+            entities.append({
+                "id": entity.id,
+                "name": entity.name,
+                "description": entity.description,
+                "fields": fields
+            })
+        result.append({
+            "id": schema.id,
+            "name": schema.name,
+            "description": schema.description,
+            "entities": entities
+        })
+    return result
+
+def get_schema_by_id(schema_id):
+    schema = Schema.query.get(schema_id)
+    if not schema:
+        return None
+
+    entities = []
+    for entity in schema.entities:
+        fields = [{"id": field.id, "name": field.name, "description": field.description} for field in entity.fields]
+        entities.append({
+            "id": entity.id,
+            "name": entity.name,
+            "description": entity.description,
+            "fields": fields
+        })
+
+    return {
+        "id": schema.id,
+        "name": schema.name,
+        "description": schema.description,
+        "entities": entities
+    }
+
 def get_schema_entities(schema_id):
     """Helper to get all entities of a specific schema."""
     schema = Schema.query.get(schema_id)
     if not schema:
-        return {}
+        return None
     
     entities = {}
     for entity in schema.entities:
         fields = [{"id": field.id, "name": field.name, "description": field.description} for field in entity.fields]
-        entities[entity.name] = {"description": entity.description, "fields": fields}
+        entities[entity.name] = {"id": entity.id, "description": entity.description, "fields": fields}
     
     return entities
 
@@ -94,6 +182,20 @@ def store_matching_data_in_db(source_schema_id, target_schema_id, source_entity_
     except Exception as e:
         db.session.rollback()
         raise RuntimeError(f"Error storing matching data in the database: {e}")
+
+def get_entity_by_id(entity_id):
+    entity = Entity.query.get(entity_id)
+    if not entity:
+        return None
+
+    fields = [{"id": field.id, "name": field.name, "description": field.description} for field in entity.fields]
+    return {
+        "id": entity.id,
+        "name": entity.name,
+        "description": entity.description,
+        "schema_id": entity.schema_id,
+        "fields": fields
+    }
 
 def get_matching_data_from_db(source_schema_id, target_schema_id, source_entity_name, target_entity_name):
     """
