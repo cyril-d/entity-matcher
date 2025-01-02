@@ -1,8 +1,8 @@
 import yaml
+import csv
 import requests
 import sys
 from app.database import insert_or_update_schema, insert_or_update_entity, db
-
 
 def download_spec_from_url(url):
     """
@@ -17,10 +17,7 @@ def download_spec_from_url(url):
     try:
         response = requests.get(url)
         response.raise_for_status()
-
-        # Attempt to parse as YAML or JSON
         return yaml.safe_load(response.text)
-
     except Exception as e:
         print(f"Error downloading or parsing spec from {url}: {e}")
         return None
@@ -47,6 +44,7 @@ def resolve_reference(ref, spec):
         return resolved
     return None
 
+
 def extract_entities_from_spec(spec):
     """
     Extract entities from OpenAPI/Swagger specifications.
@@ -61,7 +59,6 @@ def extract_entities_from_spec(spec):
     """
     entities = []
 
-    # Locate schemas or definitions (depending on OpenAPI/Swagger version)
     schemas = spec.get("components", {}).get("schemas", {})
     if not schemas:
         schemas = spec.get("definitions", {})
@@ -70,7 +67,6 @@ def extract_entities_from_spec(spec):
         schema_type = schema.get("type")
         properties = schema.get("properties", {})
 
-        # Ensure this schema is an object with properties
         if schema_type != "object" or not properties:
             continue
 
@@ -80,7 +76,6 @@ def extract_entities_from_spec(spec):
         for prop_name, prop_info in properties.items():
             prop_type = prop_info.get("type")
             if "$ref" in prop_info:
-                # Resolve the reference and check if it's a primitive
                 ref_definition = resolve_reference(prop_info["$ref"], spec)
                 if ref_definition:
                     ref_type = ref_definition.get("type")
@@ -93,7 +88,6 @@ def extract_entities_from_spec(spec):
                             "enum": ref_definition.get("enum")
                         })
             elif prop_type in ["string", "number", "boolean", "integer"] or "enum" in prop_info:
-                # Directly defined primitive or enum
                 has_primitive = True
                 fields.append({
                     "name": prop_name,
@@ -102,7 +96,6 @@ def extract_entities_from_spec(spec):
                     "enum": prop_info.get("enum")
                 })
 
-        # If it has at least one primitive, treat it as an entity
         if has_primitive:
             entities.append({
                 "name": schema_name,
@@ -112,21 +105,69 @@ def extract_entities_from_spec(spec):
 
     return entities
 
+
+def process_csv_file(csv_file, schema):
+    """
+    Process a CSV file to extract entities and insert them into the database.
+
+    Args:
+        csv_file (str): Path to the CSV file.
+        schema: The schema object in the database.
+    """
+    try:
+        entities = {}
+
+        with open(csv_file, 'r') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                entity_name = row["Data Set"].replace(" ", "_")
+                field_name = row["Field Name"]
+                field_type = row["Type"]
+                nullable = row.get("Nullable", "").lower() == "yes"
+                description = row["Description"]
+
+                # Collect fields for the entity
+                if entity_name not in entities:
+                    entities[entity_name] = {
+                        "description": f"Entity from {csv_file}",
+                        "fields": []
+                    }
+
+                entities[entity_name]["fields"].append({
+                    "name": field_name,
+                    "type": field_type,
+                    "description": description,
+                    "nullable": nullable
+                })
+
+        # Insert or update each entity in the database
+        for entity_name, entity_data in entities.items():
+            insert_or_update_entity(
+                schema_id=schema.id,
+                entity_name=entity_name,
+                entity_description=entity_data["description"],
+                fields_data=entity_data["fields"]
+            )
+            print(f"Inserted/Updated entity: {entity_name} with {len(entity_data['fields'])} fields")
+
+    except Exception as e:
+        print(f"Error processing CSV file {csv_file}: {e}")
+
+
+
 def process_sources(input_file, schema_name, schema_description):
     """
-    Reads a list of OpenAPI/Swagger YAML file paths or URLs, extracts entities, 
+    Reads a list of OpenAPI/Swagger YAML file paths, URLs, or CSV files, extracts entities,
     and inserts them into the database under a single schema.
 
     Args:
-        input_file (str): Path to the file containing OpenAPI/Swagger sources (file paths or URLs).
+        input_file (str): Path to the file containing sources (file paths, URLs, or CSV files).
         schema_name (str): Name of the schema to insert entities into.
         schema_description (str): Description of the schema.
     """
-    # Create or update the schema in the database
     schema = insert_or_update_schema(schema_name, schema_description)
 
     try:
-        # Read the list of sources (file paths or URLs)
         with open(input_file, 'r') as file:
             sources = [
                 line.strip()
@@ -140,12 +181,12 @@ def process_sources(input_file, schema_name, schema_description):
 
         print(f"Processing schema: {schema_name} (ID: {schema.id})")
 
-        # Loop through each source and extract entities
         for source in sources:
             print(f"Processing source: {source}")
 
-            # Determine if the source is a URL or a file path
-            if source.startswith("http://") or source.startswith("https://"):
+            if source.lower().endswith(".csv"):
+                process_csv_file(source, schema)
+            elif source.startswith("http://") or source.startswith("https://"):
                 spec = download_spec_from_url(source)
             else:
                 try:
@@ -159,14 +200,12 @@ def process_sources(input_file, schema_name, schema_description):
                 print(f"Skipping invalid or unreadable source: {source}")
                 continue
 
-            # Extract entities from the specification
             entities = extract_entities_from_spec(spec)
 
             if not entities:
                 print(f"No entities found in source: {source}")
                 continue
 
-            # Insert or update each entity in the database
             for entity in entities:
                 entity_name = entity.get('name')
                 entity_description = entity.get('description')
@@ -187,7 +226,6 @@ def process_sources(input_file, schema_name, schema_description):
 
 
 if __name__ == "__main__":
-    # Command-line arguments
     if len(sys.argv) != 4:
         print("Usage: python api_entity_extractor.py <input_file> <schema_name> <schema_description>")
         sys.exit(1)
@@ -196,10 +234,7 @@ if __name__ == "__main__":
     schema_name = sys.argv[2]
     schema_description = sys.argv[3]
 
-    # Initialize Flask app context for database operations
-    from main import app  # Import the Flask app
+    from main import app
 
     with app.app_context():
         process_sources(input_file, schema_name, schema_description)
-
-# Sample File: sources.txt
