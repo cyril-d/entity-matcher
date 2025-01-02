@@ -175,7 +175,7 @@ def process_sources(input_file, schema_name, schema_description):
                     schema_id=schema.id,
                     entity_name=entity_name,
                     entity_description=entity_description,
-                    fields_data=[]  # Empty since OpenAPI/Swagger entities typically don't have fields directly
+                    fields_data=entity.get('fields')
                 )
 
                 print(f"Inserted/Updated entity: {entity_name}")
