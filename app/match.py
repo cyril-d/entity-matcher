@@ -1,7 +1,10 @@
+import faiss
 import torch
 from sentence_transformers import SentenceTransformer
 import numpy as np
 from openai import OpenAI
+
+from app.database import fetch_entity_embeddings, get_schema_entities, store_embedding
 
 # Configuration for embedding models
 config = {
@@ -9,8 +12,8 @@ config = {
         {"name": "openai", "use": lambda api_key: bool(api_key)},
         #{"name": "msmarco-distilbert-base-v3", "instance": SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v3")},
         #{"name": "all-mpnet-base-v2", "instance": SentenceTransformer("sentence-transformers/all-mpnet-base-v2")},
-        #{"name": "multi-qa-mpnet-base-dot-v1", "instance": SentenceTransformer("sentence-transformers/multi-qa-mpnet-base-dot-v1")},
-        {"name": "colbertv2.0", "instance": SentenceTransformer("colbert-ir/colbertv2.0")},
+        {"name": "multi-qa-mpnet-base-dot-v1", "instance": SentenceTransformer("sentence-transformers/multi-qa-mpnet-base-dot-v1")},
+        #{"name": "colbertv2.0", "instance": SentenceTransformer("colbert-ir/colbertv2.0")},
     ],
     "openai_api_key": ""
 }
@@ -19,88 +22,141 @@ client = None
 if (config.get("openai_api_key")):
     client = OpenAI(api_key=config.get("openai_api_key"))
 
-def match_fields(source_fields, target_entity_names, target_entities):
+def add_embeddings_to_faiss(embeddings, faiss_index, metadata_mapping):
+    """
+    Add embeddings to a FAISS index.
+
+    Args:
+        embeddings (list): List of embeddings and their metadata.
+        faiss_index (faiss.Index): FAISS index to populate.
+        metadata_mapping (dict): Mapping of FAISS indices to metadata.
+    """
+    for i, embedding in enumerate(embeddings):
+        faiss_index.add(np.array([embedding["embedding"]], dtype="float32"))
+        metadata_mapping[len(metadata_mapping)] = {
+            "entity_id": embedding["entity_id"],
+            "field_id": embedding["field_id"],
+            "description": embedding["description"]
+        }
+
+def search_embeddings(source_text, model, faiss_index, metadata_mapping, k=5):
+    """
+    Search for the nearest neighbors of a given source text in the FAISS index.
+
+    Args:
+        source_text (str): Source text to embed and search.
+        model (SentenceTransformer): Model for generating embeddings.
+        faiss_index (faiss.Index): FAISS index to search.
+        metadata_mapping (dict): Mapping of FAISS indices to metadata.
+        k (int): Number of nearest neighbors to retrieve.
+
+    Returns:
+        List[dict]: List of nearest neighbors and their metadata.
+    """
+    source_embedding = model.encode([source_text], convert_to_tensor=False)[0]
+    source_embedding = np.array([source_embedding], dtype="float32")
+    
+    distances, indices = faiss_index.search(source_embedding, k)
+    results = []
+    for idx, distance in zip(indices[0], distances[0]):
+        if idx == -1:
+            continue
+        metadata = metadata_mapping[idx]
+        metadata["distance"] = distance
+        results.append(metadata)
+    return results
+
+def generate_embeddings(model_config, field):
+    text = f"Field: {field['name'].replace('_', ' ')}. Description: {field['description']}"
+    if model_config["name"] == "openai":
+        if not client:
+            return None
+        response = client.embeddings.create(input=text, model="text-embedding-ada-002")
+        embedding = response.data[0].embedding
+        embedding = torch.tensor(embedding)
+    else:
+        model = model_config["instance"]
+        embedding = model.encode([text], convert_to_tensor=True)[0]
+    return embedding.cpu()
+
+
+def match_fields(source_entity, target_entities, model_name):
     """
     Matches fields between source and target entities using multiple embedding models.
 
     Args:
-        source_fields (list): List of source fields with 'name' and 'description'.
-        target_entity_names (list): Entities to target
-        target_entities (dict): Map of entity names to fields list mapping from the target schema
-
+        source_entity (Entity): source entity.
+        target_entities (list): List of entities to map to
+        model_name (str): Name of model to use.
     Returns:
         dict: A mapping where the key is the source field name, and the value is list of top 5 matches across
               all models.
     """
+    model = next((x for x in config["models"] if x["name"] == model_name), None)
+    all_entities = {source_entity["id"]: source_entity}
+    for entity in target_entities:
+        all_entities[entity["id"]] = entity
+
+    for entity_id, entity in all_entities.items():
+        entity_embeddings = fetch_entity_embeddings([entity_id], model_name)
+        # All or none for now. If an entity field is added, the whole entity has to be regenerated.
+        # TODO: add logic to check for missing field embeddings and regenerate
+        if not entity_embeddings:
+            entity_embeddings = [{
+                "field": {"id": field["id"], "name": field["name"], "description": field["description"]},
+                "entity_id": entity_id,
+                "model_name": model_name,
+                "embedding": generate_embeddings(model, field)
+            } for field in entity["fields"]]
+            [store_embedding(field_embedding["field"]["id"], model_name, field_embedding["embedding"]) for field_embedding in entity_embeddings]
+        all_entities[entity["id"]]["embeddings"] = entity_embeddings
+
     field_mappings = {}
-    target_fields = []
 
-    for key, value in target_entities.items():
-        target_fields.extend({"entity_name": key, "field": item} for item in value["fields"])
+    # Initialize FAISS index. TODO: DONT hardcode 768
+    dim = 768  # Assuming embeddings have 768 dimensions
+    faiss_index = faiss.IndexFlatL2(dim)
+    metadata_mapping = {}
 
-    for source_field in source_fields:
-        source_field_name = source_field['name']
+    target_embeddings = [embedding for target_entity in target_entities for embedding in target_entity["embeddings"]]
+
+    # Add target embeddings to the FAISS index
+    if target_embeddings:
+        embeddings = np.array([item["embedding"] for item in target_embeddings]).astype("float32")
+        faiss_index.add(embeddings)
+        metadata_mapping = {i: target_embeddings[i] for i in range(len(target_embeddings))}
+
+    # Process source fields
+    for source_field_embedding in source_entity["embeddings"]:
+        source_field = source_field_embedding["field"]
+        source_field_name = source_field["name"]
         source_text = f"Field: {source_field_name.replace('_', ' ')}. Description: {source_field['description']}"
-        model_matches = {}
 
-        # Generate embeddings with multiple models
-        for model_config in config["models"]:
-            if model_config["name"] == "openai":
-                if not client:
-                    continue
+        source_embedding = source_field_embedding["embedding"]
 
-                response = client.embeddings.create(input=source_text, model="text-embedding-ada-002")
-                source_embedding = response.data[0].embedding
-                    
-                target_embeddings = [
-                    response.data[0].embedding
-                    for target_field in target_fields
-                    for response in [client.embeddings.create(
-                        input=f"Field: {target_field.get('field')['name'].replace('_', ' ')}. Description: {target_field['field']['description']}",
-                        model="text-embedding-ada-002"
-                    )]
+        # Search FAISS for top matches
+        if faiss_index.ntotal > 0:
+            distances, indices = faiss_index.search(np.array(source_embedding, dtype="float32").reshape(1, -1), k=5)
+            if all(idx == -1 for idx in indices[0]):
+                matches = []
+            else:
+                matches = [
+                    {
+                        "target_entity_id": metadata_mapping[idx]["entity_id"],
+                        "target_field_id": metadata_mapping[idx]["field"]["id"],
+                        "target_field_name": metadata_mapping[idx]["field"]["name"],
+                        "target_field_description": metadata_mapping[idx]["field"]["description"],
+                        "score": 1 - distances[0][i],  # FAISS uses L2 distance; convert to similarity
+                    }
+                    for i, idx in enumerate(indices[0])
+                    if idx != -1  # Skip indices that are -1
                 ]
 
-                source_embedding = torch.tensor(source_embedding)
-                target_embeddings = torch.tensor(target_embeddings)
-
-            else:
-                model = model_config["instance"]
-                source_embedding = model.encode([source_text], convert_to_tensor=True)[0]
-                target_embeddings = torch.stack([
-                    model.encode(f"Field: {target_field.get('field')['name'].replace('_', ' ')}. Description: {target_field.get('field')['description']}", convert_to_tensor=True)
-                    for target_field in target_fields
-                ])
-
-            # Compute similarity scores
-            field_similarities = rank_candidates_pytorch(source_embedding, target_embeddings)
-            model_matches[model_config["name"]] = [
-                {
-                    "target_entity_name": target_fields[target_index].get('entity_name'),
-                    "target_field_name": target_fields[target_index].get('field')["name"],
-                    "target_field_description": target_fields[target_index].get('field')["description"],
-                    "score": float(score)
-                }
-                for target_index, score in field_similarities
-            ]
-
-        # Add matches for this source field
-        top_matches = []
-
-        all_items = [
-            item for values in model_matches.values() for item in values
-        ]
-        top_matches = sorted(all_items, key=lambda x: x['score'], reverse=True)[:5]
-
-        if not top_matches or len(top_matches) < 1 or top_matches[0]['score'] < 0.89:
-            print(f"No match found for {source_field_name}")
-        else:
-            print(f"Matches found for {source_field_name}: {top_matches[0]}")
-
-        field_mappings[source_field_name] = top_matches
+            field_mappings[source_field_name] = matches
 
     return field_mappings
 
+# Not used after switching to FAISS but may use it again later.
 def rank_candidates_pytorch(source_embedding, target_embeddings):
     """
     Rank target embeddings based on cosine similarity to the source embedding.

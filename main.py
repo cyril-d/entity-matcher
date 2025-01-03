@@ -1,3 +1,4 @@
+import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from app.database import (
@@ -7,15 +8,16 @@ from app.database import (
     db,
     get_entity_by_id,
     get_matching_data_from_db,
-    get_schema_by_id, 
-    insert_or_update_schema, 
-    insert_or_update_entity, 
-    delete_entity, 
-    get_all_schemas, 
+    get_schema_by_id,
+    insert_or_update_schema,
+    insert_or_update_entity,
+    delete_entity,
+    get_all_schemas,
     get_schema_entities,
-    store_matching_data_in_db
+    store_matching_data_in_db, get_entity_by_name, get_entities_by_names, get_entities_by_ids
 )
 from app.match import match_fields
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -201,43 +203,77 @@ def api_list_entities(schema_id):
 def match_entities():
     """API to match fields of an entity between schemas."""
     data = request.get_json()
-    source_schema_id = data.get("source_schema_id")
-    target_schema_id = data.get("target_schema_id")
-    source_entity_name = data.get("source_entity_name")
-    target_entity_names = data.get("target_entity_names")
-    ignore_db = data.get("ignore_db", False)  # Default to False
 
-    # Validate inputs
-    if not all([source_schema_id, target_schema_id, source_entity_name, target_entity_names]):
-        return generateResponse({"error": "All fields are required."}, 400)
+    model_name = data.get('model_name')
+    source_schema_id = data.get("source_schema_id")
+    source_entity_name = data.get("source_entity_name")
+    source_entity_id = data.get("source_entity_id")
+
+    target_schema_id = data.get("target_schema_id")
+    target_entity_names = data.get("target_entity_names")
+    target_entity_ids = data.get("target_entity_ids")
+
+    ignore_db = False #data.get("ignore_db", False)  # Default to False
+
+    if not source_entity_id and not source_entity_name and not source_schema_id:
+        return generateResponse({"error": "Source entity is missing"}, 400)
+    if not target_entity_ids and not target_entity_names and not source_schema_id:
+        return generateResponse({"error": "Target entities are missing"}, 400)
+
+
+    if not source_entity_id:
+        source_entity = get_entity_by_name(source_schema_id, source_entity_name)
+    else:
+        source_entity = get_entity_by_id(source_entity_id)
+
+    if not target_entity_ids:
+        target_entities = get_entities_by_names(target_schema_id, target_entity_names)
+    else:
+        target_entities = get_entities_by_ids(target_entity_ids)
+
+    if not source_entity :
+        return generateResponse({"error": "Source entity not found in the specified schema."}, 404)
+    elif not target_entities:
+        return generateResponse({"error": "Target entity not found in the specified schema."}, 404)
 
     if not ignore_db:
         db_data = get_matching_data_from_db(
-            source_schema_id, target_schema_id, source_entity_name
+            source_entity, model_name
         )
         if db_data:
             return generateResponse({"field_mappings": db_data}, 200)
 
-    source_entities = get_schema_entities(source_schema_id)
-    target_entities = get_schema_entities(target_schema_id)
-
-    for target_entity_name in target_entity_names:
-        if source_entity_name not in source_entities:
-            return generateResponse({"error": "Source entity not found in the specified schema." + source_entity_name}, 404)
-        if target_entity_name not in target_entities:
-            return generateResponse({"error": "Target entity not found in the specified schema." + target_entity_name}, 404)
-
-    source_fields = source_entities[source_entity_name]["fields"]
-
     # Perform field matching using external match function
-    field_mappings = match_fields(source_fields, target_entity_names, target_entities)
+    field_mappings = match_fields(source_entity, target_entities, model_name)
+    native_field_mappings = convert_numpy_types(field_mappings)
+
     # Store the result in the database for future queries (mock function `store_matching_data_in_db`)
     store_matching_data_in_db(
-        source_schema_id, target_schema_id, source_entity_name, field_mappings
+        source_entity, model_name, native_field_mappings
     )
 
 
-    return generateResponse({"field_mappings": field_mappings}, 200)
+    return generateResponse(native_field_mappings, 200)
+
+# Function to recursively convert NumPy types to native Python types
+def convert_numpy_types(obj):
+    if isinstance(obj, np.ndarray):  # If it's a numpy array
+        return obj.tolist()  # Convert to a list
+    elif isinstance(obj, np.generic):  # If it's a numpy scalar (e.g., float32)
+        return obj.item()  # Convert to native Python type (float, int, etc.)
+    elif isinstance(obj, dict):  # If it's a dictionary
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):  # If it's a list
+        return [convert_numpy_types(item) for item in obj]
+    else:
+        return obj  # Return the object as is if it's a native Python type
+
+# Custom serializer for numpy types
+def numpy_serializer(obj):
+    if isinstance(obj, np.generic):  # If it's a numpy type (like numpy.float32)
+        return obj.item()  # Convert to native Python type (float, int, etc.)
+    raise TypeError(f"Type {type(obj)} not serializable")
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True)
