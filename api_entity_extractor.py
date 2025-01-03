@@ -2,7 +2,8 @@ import yaml
 import csv
 import requests
 import sys
-from app.database import insert_or_update_schema, insert_or_update_entity, db
+from app.database import insert_or_update_schema, insert_or_update_entity, db, add_field
+
 
 def download_spec_from_url(url):
     """
@@ -115,40 +116,21 @@ def process_csv_file(csv_file, schema):
         schema: The schema object in the database.
     """
     try:
-        entities = {}
-
         with open(csv_file, 'r') as file:
             reader = csv.DictReader(file)
             for row in reader:
                 entity_name = row["Data Set"].replace(" ", "_")
-                field_name = row["Field Name"]
+                field_name = row["Field Name"].replace(" ", "_")
                 field_type = row["Type"]
                 nullable = row.get("Nullable", "").lower() == "yes"
                 description = row["Description"]
 
-                # Collect fields for the entity
-                if entity_name not in entities:
-                    entities[entity_name] = {
-                        "description": f"Entity from {csv_file}",
-                        "fields": []
-                    }
-
-                entities[entity_name]["fields"].append({
+                add_field(schema.id, entity_name, f"Entity from {csv_file}", [{
                     "name": field_name,
                     "type": field_type,
                     "description": description,
                     "nullable": nullable
-                })
-
-        # Insert or update each entity in the database
-        for entity_name, entity_data in entities.items():
-            insert_or_update_entity(
-                schema_id=schema.id,
-                entity_name=entity_name,
-                entity_description=entity_data["description"],
-                fields_data=entity_data["fields"]
-            )
-            print(f"Inserted/Updated entity: {entity_name} with {len(entity_data['fields'])} fields")
+                }])
 
     except Exception as e:
         print(f"Error processing CSV file {csv_file}: {e}")
@@ -186,38 +168,39 @@ def process_sources(input_file, schema_name, schema_description):
 
             if source.lower().endswith(".csv"):
                 process_csv_file(source, schema)
-            elif source.startswith("http://") or source.startswith("https://"):
-                spec = download_spec_from_url(source)
             else:
-                try:
-                    with open(source, 'r') as file:
-                        spec = yaml.safe_load(file)
-                except Exception as e:
-                    print(f"Error reading or parsing file {source}: {e}")
-                    spec = None
+                if source.startswith("http://") or source.startswith("https://"):
+                    spec = download_spec_from_url(source)
+                else:
+                    try:
+                        with open(source, 'r') as file:
+                            spec = yaml.safe_load(file)
+                    except Exception as e:
+                        print(f"Error reading or parsing file {source}: {e}")
+                        spec = None
 
-            if not spec:
-                print(f"Skipping invalid or unreadable source: {source}")
-                continue
+                if not spec:
+                    print(f"Skipping invalid or unreadable source: {source}")
+                    continue
 
-            entities = extract_entities_from_spec(spec)
+                entities = extract_entities_from_spec(spec)
 
-            if not entities:
-                print(f"No entities found in source: {source}")
-                continue
+                if not entities:
+                    print(f"No entities found in source: {source}")
+                    continue
 
-            for entity in entities:
-                entity_name = entity.get('name')
-                entity_description = entity.get('description')
+                for entity in entities:
+                    entity_name = entity.get('name')
+                    entity_description = entity.get('description')
 
-                insert_or_update_entity(
-                    schema_id=schema.id,
-                    entity_name=entity_name,
-                    entity_description=entity_description,
-                    fields_data=entity.get('fields')
-                )
+                    insert_or_update_entity(
+                        schema_id=schema.id,
+                        entity_name=entity_name,
+                        entity_description=entity_description,
+                        fields_data=entity.get('fields')
+                    )
 
-                print(f"Inserted/Updated entity: {entity_name}")
+                    print(f"Inserted/Updated entity: {entity_name}")
 
         print("All sources processed successfully.")
 

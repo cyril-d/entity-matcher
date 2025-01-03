@@ -77,6 +77,25 @@ def insert_or_update_entity(schema_id, entity_name, entity_description=None, fie
     db.session.commit()
     return entity
 
+def add_field(schema_id, entity_name, entity_description, fields_data=None):
+    entity = Entity.query.filter_by(name=entity_name, schema_id=schema_id).first()
+
+    if not entity:
+        entity = Entity(name=entity_name, description=entity_description, schema_id=schema_id)
+        db.session.add(entity)
+        db.session.commit()
+
+    if fields_data:
+        for field_data in fields_data:
+            field = Field(
+                name=field_data.get('name'),
+                description=field_data.get('description'),
+                entity_id=entity.id
+            )
+            db.session.add(field)
+
+    db.session.commit()
+    return entity
 
 def delete_entity(entity_id):
     entity = Entity.query.get(entity_id)
@@ -151,7 +170,6 @@ def store_matching_data_in_db(source_schema_id, target_schema_id, source_entity_
         source_schema_id (int): ID of the source schema.
         target_schema_id (int): ID of the target schema.
         source_entity_name (str): Name of the source entity.
-        target_entity_name (str): Name of the target entity.
         field_mappings (dict): Field mapping data in JSON format.
     """
     try:
@@ -159,8 +177,7 @@ def store_matching_data_in_db(source_schema_id, target_schema_id, source_entity_
         field_match = FieldMatch.query.filter_by(
             source_schema_id=source_schema_id,
             target_schema_id=target_schema_id,
-            source_entity_name=source_entity_name,
-            target_entity_name=target_entity_name
+            source_entity_name=source_entity_name
         ).first()
 
         if field_match:
@@ -172,7 +189,6 @@ def store_matching_data_in_db(source_schema_id, target_schema_id, source_entity_
                 source_schema_id=source_schema_id,
                 target_schema_id=target_schema_id,
                 source_entity_name=source_entity_name,
-                target_entity_name=target_entity_name,
                 field_mappings=field_mappings
             )
             db.session.add(field_match)
@@ -197,7 +213,7 @@ def get_entity_by_id(entity_id):
         "fields": fields
     }
 
-def get_matching_data_from_db(source_schema_id, target_schema_id, source_entity_name, target_entity_name):
+def get_matching_data_from_db(source_schema_id, target_schema_id, source_entity_name):
     """
     Retrieves matching data from the database.
 
@@ -205,7 +221,6 @@ def get_matching_data_from_db(source_schema_id, target_schema_id, source_entity_
         source_schema_id (int): ID of the source schema.
         target_schema_id (int): ID of the target schema.
         source_entity_name (str): Name of the source entity.
-        target_entity_name (str): Name of the target entity.
 
     Returns:
         dict or None: Field mapping data in JSON format if found, otherwise None.
@@ -214,8 +229,7 @@ def get_matching_data_from_db(source_schema_id, target_schema_id, source_entity_
         field_match = FieldMatch.query.filter_by(
             source_schema_id=source_schema_id,
             target_schema_id=target_schema_id,
-            source_entity_name=source_entity_name,
-            target_entity_name=target_entity_name
+            source_entity_name=source_entity_name
         ).first()
 
         if field_match:

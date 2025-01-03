@@ -1,3 +1,5 @@
+from collections.abc import Hashable
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from app.database import (
@@ -204,38 +206,38 @@ def match_entities():
     source_schema_id = data.get("source_schema_id")
     target_schema_id = data.get("target_schema_id")
     source_entity_name = data.get("source_entity_name")
-    target_entity_name = data.get("target_entity_name")
+    target_entity_names = data.get("target_entity_names")
     ignore_db = data.get("ignore_db", False)  # Default to False
 
     # Validate inputs
-    if not all([source_schema_id, target_schema_id, source_entity_name, target_entity_name]):
+    if not all([source_schema_id, target_schema_id, source_entity_name, target_entity_names]):
         return generateResponse({"error": "All fields are required."}, 400)
 
-    # Check the database first (mock function `get_matching_data_from_db`)
     if not ignore_db:
         db_data = get_matching_data_from_db(
-            source_schema_id, target_schema_id, source_entity_name, target_entity_name
+            source_schema_id, target_schema_id, source_entity_name
         )
         if db_data:
             return generateResponse({"field_mappings": db_data}, 200)
 
-    # Retrieve entities
     source_entities = get_schema_entities(source_schema_id)
     target_entities = get_schema_entities(target_schema_id)
 
-    if source_entity_name not in source_entities or target_entity_name not in target_entities:
-        return generateResponse({"error": "Entity not found in the specified schema."}, 404)
+    for target_entity_name in target_entity_names:
+        if source_entity_name not in source_entities:
+            return generateResponse({"error": "Source entity not found in the specified schema." + source_entity_name}, 404)
+        if target_entity_name not in target_entities:
+            return generateResponse({"error": "Target entity not found in the specified schema." + target_entity_name}, 404)
 
     source_fields = source_entities[source_entity_name]["fields"]
-    target_fields = target_entities[target_entity_name]["fields"]
 
     # Perform field matching using external match function
-    field_mappings = match_fields(source_fields, target_fields)
-
+    field_mappings = match_fields(source_fields, target_entity_names, target_entities)
     # Store the result in the database for future queries (mock function `store_matching_data_in_db`)
     store_matching_data_in_db(
-        source_schema_id, target_schema_id, source_entity_name, target_entity_name, field_mappings
+        source_schema_id, target_schema_id, source_entity_name, field_mappings
     )
+
 
     return generateResponse({"field_mappings": field_mappings}, 200)
 

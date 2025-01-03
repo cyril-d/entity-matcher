@@ -8,5 +8,8 @@
 # https://example.com/openapi.yaml
 # https://api.example.com/swagger.json
 
+# CSV Files
+ADCDictionary.csv
+
 # Ignore the following commented-out lines
 # https://example.com/invalid-spec.yaml

@@ -7,9 +7,9 @@ from openai import OpenAI
 config = {
     "models": [
         {"name": "openai", "use": lambda api_key: bool(api_key)},
-        {"name": "msmarco-distilbert-base-v3", "instance": SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v3")},
-        {"name": "all-mpnet-base-v2", "instance": SentenceTransformer("sentence-transformers/all-mpnet-base-v2")},
-        {"name": "multi-qa-mpnet-base-dot-v1", "instance": SentenceTransformer("sentence-transformers/multi-qa-mpnet-base-dot-v1")},
+        #{"name": "msmarco-distilbert-base-v3", "instance": SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v3")},
+        #{"name": "all-mpnet-base-v2", "instance": SentenceTransformer("sentence-transformers/all-mpnet-base-v2")},
+        #{"name": "multi-qa-mpnet-base-dot-v1", "instance": SentenceTransformer("sentence-transformers/multi-qa-mpnet-base-dot-v1")},
         {"name": "colbertv2.0", "instance": SentenceTransformer("colbert-ir/colbertv2.0")},
     ],
     "openai_api_key": ""
@@ -19,19 +19,24 @@ client = None
 if (config.get("openai_api_key")):
     client = OpenAI(api_key=config.get("openai_api_key"))
 
-def match_fields(source_fields, target_fields):
+def match_fields(source_fields, target_entity_names, target_entities):
     """
     Matches fields between source and target entities using multiple embedding models.
 
     Args:
         source_fields (list): List of source fields with 'name' and 'description'.
-        target_fields (list): List of target fields with 'name' and 'description'.
+        target_entity_names (list): Entities to target
+        target_entities (dict): Map of entity names to fields list mapping from the target schema
 
     Returns:
-        dict: A mapping where the key is the source field name, and the value is another dictionary
-              with model names as keys and an array of target field matches ordered by score as values.
+        dict: A mapping where the key is the source field name, and the value is list of top 5 matches across
+              all models.
     """
     field_mappings = {}
+    target_fields = []
+
+    for key, value in target_entities.items():
+        target_fields.extend({"entity_name": key, "field": item} for item in value["fields"])
 
     for source_field in source_fields:
         source_field_name = source_field['name']
@@ -42,8 +47,8 @@ def match_fields(source_fields, target_fields):
         for model_config in config["models"]:
             if model_config["name"] == "openai":
                 if not client:
-                    continue;
-                
+                    continue
+
                 response = client.embeddings.create(input=source_text, model="text-embedding-ada-002")
                 source_embedding = response.data[0].embedding
                     
@@ -51,7 +56,7 @@ def match_fields(source_fields, target_fields):
                     response.data[0].embedding
                     for target_field in target_fields
                     for response in [client.embeddings.create(
-                        input=f"Field: {target_field['name'].replace('_', ' ')}. Description: {target_field['description']}",
+                        input=f"Field: {target_field.get('field')['name'].replace('_', ' ')}. Description: {target_field['field']['description']}",
                         model="text-embedding-ada-002"
                     )]
                 ]
@@ -63,7 +68,7 @@ def match_fields(source_fields, target_fields):
                 model = model_config["instance"]
                 source_embedding = model.encode([source_text], convert_to_tensor=True)[0]
                 target_embeddings = torch.stack([
-                    model.encode(f"Field: {target_field['name'].replace('_', ' ')}. Description: {target_field['description']}", convert_to_tensor=True)
+                    model.encode(f"Field: {target_field.get('field')['name'].replace('_', ' ')}. Description: {target_field.get('field')['description']}", convert_to_tensor=True)
                     for target_field in target_fields
                 ])
 
@@ -71,15 +76,28 @@ def match_fields(source_fields, target_fields):
             field_similarities = rank_candidates_pytorch(source_embedding, target_embeddings)
             model_matches[model_config["name"]] = [
                 {
-                    "target_field_name": target_fields[target_index]["name"],
-                    "target_field_description": target_fields[target_index]["description"],
+                    "target_entity_name": target_fields[target_index].get('entity_name'),
+                    "target_field_name": target_fields[target_index].get('field')["name"],
+                    "target_field_description": target_fields[target_index].get('field')["description"],
                     "score": float(score)
                 }
                 for target_index, score in field_similarities
             ]
 
         # Add matches for this source field
-        field_mappings[source_field_name] = model_matches
+        top_matches = []
+
+        all_items = [
+            item for values in model_matches.values() for item in values
+        ]
+        top_matches = sorted(all_items, key=lambda x: x['score'], reverse=True)[:5]
+
+        if not top_matches or len(top_matches) < 1 or top_matches[0]['score'] < 0.89:
+            print(f"No match found for {source_field_name}")
+        else:
+            print(f"Matches found for {source_field_name}: {top_matches[0]}")
+
+        field_mappings[source_field_name] = top_matches
 
     return field_mappings
 
