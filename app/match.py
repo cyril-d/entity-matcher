@@ -6,14 +6,16 @@ from openai import OpenAI
 
 from app.database import fetch_entity_embeddings, get_schema_entities, store_embedding
 
-# Configuration for embedding models
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 config = {
     "models": [
         {"name": "openai", "use": lambda api_key: bool(api_key)},
-        #{"name": "msmarco-distilbert-base-v3", "instance": SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v3")},
-        #{"name": "all-mpnet-base-v2", "instance": SentenceTransformer("sentence-transformers/all-mpnet-base-v2")},
-        {"name": "multi-qa-mpnet-base-dot-v1", "instance": SentenceTransformer("sentence-transformers/multi-qa-mpnet-base-dot-v1")},
-        #{"name": "colbertv2.0", "instance": SentenceTransformer("colbert-ir/colbertv2.0")},
+        {"name": "distilbert-base-nli-mean-tokens", "instance": SentenceTransformer("sentence-transformers/distilbert-base-nli-mean-tokens").to(device)},
+        {"name": "msmarco-distilbert-base-v3", "instance": SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v3").to(device)},
+        {"name": "all-mpnet-base-v2", "instance": SentenceTransformer("sentence-transformers/all-mpnet-base-v2").to(device)},
+        {"name": "multi-qa-mpnet-base-dot-v1", "instance": SentenceTransformer("sentence-transformers/multi-qa-mpnet-base-dot-v1").to(device)},
+        {"name": "colbertv2.0", "instance": SentenceTransformer("colbert-ir/colbertv2.0").to(device)},
     ],
     "openai_api_key": ""
 }
@@ -74,10 +76,16 @@ def generate_embeddings(model_config, field):
         response = client.embeddings.create(input=text, model="text-embedding-ada-002")
         embedding = response.data[0].embedding
         embedding = torch.tensor(embedding)
+        return embedding
     else:
         model = model_config["instance"]
-        embedding = model.encode([text], convert_to_tensor=True)[0]
-    return embedding.cpu()
+        try:
+            embedding = model.encode([text], convert_to_tensor=True)[0]
+            return embedding.cpu()
+        except Exception as e:
+            print(e)
+            return None
+
 
 
 def match_fields(source_entity, target_entities, model_name):
@@ -114,8 +122,6 @@ def match_fields(source_entity, target_entities, model_name):
     field_mappings = {}
 
     # Initialize FAISS index. TODO: DONT hardcode 768
-    dim = 768  # Assuming embeddings have 768 dimensions
-    faiss_index = faiss.IndexFlatL2(dim)
     metadata_mapping = {}
 
     target_embeddings = [embedding for target_entity in target_entities for embedding in target_entity["embeddings"]]
@@ -123,6 +129,16 @@ def match_fields(source_entity, target_entities, model_name):
     # Add target embeddings to the FAISS index
     if target_embeddings:
         embeddings = np.array([item["embedding"] for item in target_embeddings]).astype("float32")
+        print(embeddings.shape)
+        if embeddings.ndim == 1:
+            embeddings = embeddings.reshape(1, -1)  # Reshape to (1, embedding_dimension)
+        elif embeddings.ndim == 2:
+            pass  # Already 2D, no need to reshape
+        else:
+            raise ValueError("Embeddings should be a 1D or 2D array")
+
+        embedding_dimension = embeddings.shape[1]
+        faiss_index = faiss.IndexFlatL2(embedding_dimension)
         faiss_index.add(embeddings)
         metadata_mapping = {i: target_embeddings[i] for i in range(len(target_embeddings))}
 
