@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entity Matcher</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Title bar styles */
+        .title-bar {
+            background-color: #1a237e;
+            color: white;
+            padding: 1rem 2rem;
+            font-size: 1.5rem;
+            font-weight: 600;
+            height: 8vh;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Controls section styles */
+        .controls {
+            height: 10vh;
+            padding: 1rem 2rem;
+            background-color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        /* Grid container styles */
+        .grid-container {
+            height: 82vh;
+            padding: 1.5rem 2rem;
+            overflow: auto;
+            background-color: #ffffff;
+            margin: 1rem 2rem;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Select container styles */
+        .select-container {
+            width: 250px;
+        }
+
+        /* Table styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th, td {
+            border: 1px solid #e0e0e0;
+            padding: 12px 16px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: #333;
+        }
+
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        /* Button styles */
+        button {
+            padding: 0.6rem 1.5rem;
+            background-color: #2962ff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 0.9rem;
+            transition: background-color 0.2s ease;
+        }
+
+        button:hover {
+            background-color: #1e4bd8;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            background-color: #2962ff;
+        }
+
+        /* Select2 customization */
+        .select2 {
+            width: 250px !important;
+        }
+
+        .select2-container .select2-selection--single,
+        .select2-container .select2-selection--multiple {
+            height: 38px;
+            border-color: #e0e0e0;
+            border-radius: 6px;
+        }
+
+        .select2-container--default .select2-selection--single .select2-selection__rendered {
+            line-height: 36px;
+            padding-left: 12px;
+        }
+
+        .select2-container--default .select2-selection--single .select2-selection__arrow {
+            height: 36px;
+        }
+
+        .select2-dropdown {
+            border-color: #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .select2-container--default .select2-results__option--highlighted[aria-selected] {
+            background-color: #2962ff;
+        }
+
+        .select2-container .select2-selection--multiple {
+            min-height: 38px;
+        }
+
+        .select2-container--default .select2-selection--multiple .select2-selection__rendered {
+            max-height: 120px;
+            overflow-y: auto;
+            padding: 4px 8px;
+        }
+
+        .select2-container--default .select2-selection--multiple .select2-selection__choice {
+            background-color: #e3f2fd;
+            border: 1px solid #2962ff;
+            color: #1e4bd8;
+            border-radius: 4px;
+            padding: 2px 8px;
+            margin: 2px 4px;
+        }
+
+        .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
+            color: #1e4bd8;
+            margin-right: 4px;
+        }
+
+        .select2-container--default .select2-selection--multiple .select2-selection__choice__remove:hover {
+            color: #1a237e;
+        }
+
+        /* Add max-height to dropdown options list */
+        .select2-results__options {
+            max-height: 200px;
+            overflow-y: auto;
+        }    </style>
+</head>
+<body>
+    <div class="title-bar">
+        Entity Matcher
+    </div>
+    <div class="controls">
+        <div class="select-container">
+            <select id="sourceSchema" class="select2">
+                <option value="">Select Source Schema</option>
+            </select>
+        </div>
+        <div class="select-container">
+            <select id="sourceEntity" class="select2" disabled>
+                <option value="">Select Source Entity</option>
+            </select>
+        </div>
+        <div class="select-container">
+            <select id="targetSchema" class="select2" disabled>
+                <option value="">Select Target Schema</option>
+            </select>
+        </div>
+        <div class="select-container">
+            <select id="targetEntities" class="select2" multiple disabled>
+                <option value="">Select Target Entities</option>
+            </select>
+        </div>
+        <button id="matchButton" disabled>Match</button>
+    </div>
+    <div class="grid-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Field Name</th>
+                    <th>Top Match</th>
+                    <th>All Matches</th>
+                </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+        </table>
+    </div>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

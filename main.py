@@ -1,5 +1,5 @@
 import numpy as np
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from app.database import (
     Entity,
@@ -35,6 +35,10 @@ def generateResponse(json, statusCode):
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.status_code = statusCode
     return response
+
+@app.route('/')
+def index():
+    return render_template('index.html')
 
 @app.route('/api/schema', methods=['POST'])
 def api_insert_or_update_schema():
