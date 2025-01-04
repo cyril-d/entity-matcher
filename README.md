@@ -18,6 +18,15 @@ This tool provides schema matching capabilities using ColBERTv2 and other models
 Using sqlite for now. The schema and all db access code is in database.py. The schema had to be changed multiple times and was done using alembic, but note alembic does have issues and sometimes I just had to use sqllite3 to connect to the db and modify the schema
 The db also stores all model embeddings to save cost when using openai. To search, we load the embeddings into a FAISS index at runtime and then do a top 5 search.  
 
+### Sample Queries
+#### Fetch an entity:
+select * from entities where entities.name='Position';
+
+#### Get embeddings for an entity: 
+select * from embeddings join fields on embeddings.field_id = fields.id and fields.entity_id in (22, 23, 153);
+#### Delete these embeddings: 
+delete from embeddings where id in (select e.id from embeddings e join fields on e.field_id = fields.id and fields.entity_id in (22, 23, 153));
+
 ## Running Locally
 1. Install dependencies:
    ```bash

@@ -8,7 +8,7 @@ $(document).ready(function() {
 
     // Fetch schemas
     $.get('/api/schemas/', function(data) {
-        schemas = data;
+        schemas = data.sort((a,b) => (a.name<b.name?-1:(a.name>b.name?1:0)));
         const sourceSchemaSelect = $('#sourceSchema');
         data.forEach(schema => {
             sourceSchemaSelect.append(new Option(schema.name, schema.id));
@@ -27,7 +27,7 @@ $(document).ready(function() {
         $('#matchButton').prop('disabled', true);
         
         if (schema) {
-            sourceEntities = schema.entities;
+            sourceEntities = schema.entities.sort((a,b) => (a.name<b.name?-1:(a.name>b.name?1:0)));
             sourceEntities.forEach(entity => {
                 $('#sourceEntity').append(new Option(entity.name, entity.id));
             });
@@ -51,7 +51,7 @@ $(document).ready(function() {
         $('#matchButton').prop('disabled', true);
         
         if (schema) {
-            targetEntities = schema.entities;
+            targetEntities = schema.entities.sort((a,b) => (a.name<b.name?-1:(a.name>b.name?1:0)));
             targetEntities.forEach(entity => {
                 $('#targetEntities').append(new Option(entity.name, entity.id));
             });
