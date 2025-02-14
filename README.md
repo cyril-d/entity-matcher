@@ -4,8 +4,8 @@
 This tool provides schema matching capabilities using ColBERTv2 and other models for semantic similarity and LLM-based ranking. It includes APIs for schema management, matching, and ranking.
 
 ## Features
-- Upload schemas with entities and fields
-- Scan OpenAPI/Swagger specs to extract entities for a schema and store it in the database.
+- api_entity_extractor.py: Scan OpenAPI yaml/Swagger json specs to extract entities for a schema and store it in the database.
+- api_entity_extractor.py: parse csv schemas with entities and fields
 - Match fields between schemas using semantic similarity
 - Embeddings used: openai, msmarco-distilbert-base-v3, all-mpnet-base-v2, multi-qa-mpnet-base-dot-v1, colbertv2.0
 - Combine these model matches with LLM for ranking (TBD)
@@ -16,9 +16,9 @@ This tool provides schema matching capabilities using ColBERTv2 and other models
 
 ## Database Stuff
 Using sqlite for now. The schema and all db access code is in database.py. The schema had to be changed multiple times and was done using alembic, but note alembic does have issues and sometimes I just had to use sqllite3 to connect to the db and modify the schema
-The db also stores all model embeddings to save cost when using openai. To search, we load the embeddings into a FAISS index at runtime and then do a top 5 search.  
+The db also stores all model embeddings (once generated) to save cost when using openai. To search, we load the embeddings into a FAISS index at runtime and then do a top 5 search.  
 
-### Sample Queries
+### Sample Queries (For my reference)
 #### Fetch an entity:
 select * from entities where entities.name='Position';
 
