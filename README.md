@@ -8,7 +8,8 @@ This tool provides schema matching capabilities using ColBERTv2 and other models
 - api_entity_extractor.py: parse csv schemas with entities and fields
 - Match fields between schemas using semantic similarity
 - Embeddings used: openai, msmarco-distilbert-base-v3, all-mpnet-base-v2, multi-qa-mpnet-base-dot-v1, colbertv2.0
-- Combine these model matches with LLM for ranking (TBD)
+- Combine these model matches with LLM prompts for ranking (To Be Done)
+- Train models on incorrect matches or user corrected matches (To Be Done)
 
 ## Requirements
 - Python 3.9+
